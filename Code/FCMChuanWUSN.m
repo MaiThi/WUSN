@@ -1,7 +1,8 @@
 % Data   X=dlmread('sensors_data.txt');
 % goi lenh [V,U1, J] = FCMChuanWUSN(X1, 3, 2, 0.01, 1, BS, 0.002, 5);
-function [EJFCM, lostNumberFCM, lostNumberUnderGroundFCM]=FCMChuanRouting(X,C,m,Eps,maxTest, BS, alpha, kU)
+function output = FCMChuanWUSN(X,C,m,Eps,maxTest, BS, alpha, kU)
 %clc
+output = {};
 [N_init,r]=size(X);
 efs = 10; % pJ/bit/m^2
 emp = 0.0013;   
@@ -30,12 +31,12 @@ matrixEnery(:, 1) = initE;
 matrixEnery(:,3) = 1;
 matrixEnery(:,4) = 0;
 EJ = [];
-EJFCM= [];
 colors=hsv(C); 
 J_min = initE *N_init;
 lostNode = [];
+aliveNode = [];
 %stopNode = 2;
-stopNode = round(N_init *0.1)
+%stopNode = round(N *0.1)
 numberDeadnodes = 0;
 numDeadUn = 0;
 repeatRounds = 2;
@@ -47,86 +48,133 @@ while (flag~=1)
     % Theo thuat toan FCM-Chuan de tim U,V
     [N,r]=size(X_next);
     while (1>0)
-     for i = 1:N
-       for j = 1:C
-          %Tinh tu so
-          Tu = 0;
-          for k = 1:r
-              Tu = Tu + power(X_next(i,k)-V(j,k),2);
-          end    
-          Tu = sqrt(Tu)
-
-          %Tinh mau so
-           
-          tong = 0;
-          for l =1:C
-              Mau = 0;
+        for i = 1:N
+           for j = 1:C
+              %Tinh tu so
+              TuBS = 0;
+              TuXi = 0;
+              TuXiU = 0;
               for k = 1:r
-                  Mau = Mau + power(X_next(i,k)-V(l,k),2);
+                  TuBS = TuBS + power(V(j,k)-BS(1,k),2);
+                  TuXi = TuXi + power(X_next(i,k)-V(j,k),2);
               end    
-              Mau = sqrt(Mau);
-              if Tu ~= 0
-                tong = tong + power(Tu/Mau, 2/(m-1)); 
+              TuBS = sqrt(TuBS);
+              TuXi = sqrt(TuXi);
+              if X(i, 3) < ground
+                  for k = 1:r
+                   TuXiU = TuXi + power(X_next(i,k)-V(j,k),2);
+                  end 
+                   TuXBaiU = sqrt(TuXiU);
+              end 
+
+              Tu = emp * power(TuBS,4) + (N - C)*efs*power(TuXi, 2) + kU*((1/log(10)) + 8.69 * alpha)* TuXiU ;
+
+              %Tinh mau so
+
+              tong = 0;
+              for l =1:C
+                  MauBS = 0;
+                  MauXk = 0;
+                  MauXkU = 0;
+                  for k = 1:r
+                      MauBS = MauBS + power(V(l,k)-BS(1,k),2);
+                      MauXk = MauXk + power(X_next(i,k)-V(l,k),2);
+                      if(X(i, 3) < ground )
+                          MauXkU = MauXkU + power(X_next(i,k)-V(l,k),2);
+                      end
+                  end    
+                  MauBS = sqrt(MauBS);
+                  MauXk = sqrt(MauXk);
+                  MauXkU = sqrt(MauXkU);     
+
+                  Mau = emp * power(MauBS,4) + (N - C)*efs*power(MauXk, 2) + kU*((1/log(10)) + 8.69 * alpha)* MauXkU ;
+
+                  tong = tong + power(Tu/Mau, 1/(m-1)); 
               end
-          end
-          if tong ~= 0
-            U(j,i) = 1/tong;  
-          else 
-            U(j,i) = 0;
-          end 
-       end    
-    end
-                       
-        %Tinh V(t+1) tu U ra W
-        for j = 1:C
-           for i = 1:r
-               tuso = 0;
-               mauso = 0;
-               for k = 1:N
-                  mauso = mauso + power(U(j,k),m);
-                  tuso = tuso + power(U(j,k),m) * X_next(k,i);
-               end
-               if (mauso ~= 0) 
-                   W(j,i) = tuso / mauso;
-               else
-                   W(j,i) = 0;
-               end
-           end
-        end   
-        
-        %So sanh W va V        
-        saiso = 0;
-        for i = 1:C
-           for j = 1:r              
-              saiso = saiso + power(W(i,j)-V(i,j),2); 
-           end
+              U(j,i) = 1/tong;
+           end    
         end
-        saiso = sqrt(saiso);
-        
-        %Kiem tra sai so voi Eps
-        if (saiso <= Eps)
-            break;
-        else          
-            %Lap tiep: Gan V = W
+            %tinh khoang cach tongX(i) den BS)
+            tongKC = [];
+           for k1 = 1:r
+                tempKC = 0;
+               for i1 = 1:N
+                      tempKC = tempKC +  (BS(1,k1) - X_next(i1,k1));
+                end    
+                tongKC(1,k1) = tempKC;
+           end
+            %Tinh V(t+1) tu U ra W
+            for j = 1:C
+               tongU = 0;
+               for k = 1:N
+                   tongU = tongU + power(U(j,k),m);
+               end
+               R = [-100 100];
+               xi(j) = rand(1)*range(R) + min(R);
+               Rz = [-10 10];
+               xz(j) = rand(1)*range(Rz) + min(Rz);
+               for t = 1:r
+                   A = 4*C*emp*tongU;
+                   B = 0;
+                   CT = 2*(N-C)*efs*power(10,-12)*tongU;
+                   D1 =  CT*tongKC(1,t);
+                   D2 = kU*((1/log(10)) + 8.69*alpha)*tongU;
+                   D = D1 - D2;
+                   %CT1 = -k*((1/log(10)) + 8.69*alpha)*tongU;
+                   W1 = power ((nthroot((27*A * power(D, 2) + 4 * power(CT,3)), 2)/ (2 * power(3,1.5) * A)) - D/(2*A), 1/3);
+                   W2 = CT/ (3*A * power ((nthroot((27*A * power(D, 2) + 4 * power(CT,3)), 2)/ (2 * power(3,1.5) * A)) - D/(2*A), 1/3));
+
+                   %W1_1 = power((nthroot((27*A*power(CT,2)*power(D1,2) + 54*A*CT*D1*(-D2)+ 27*A*power(D2,2) + 4 * power(CT,3)) ,2)/(2 * power(3,3/2) * A)) - ((D1*CT - D2)/(2*A)),1/3);
+                   %W1_2 = B/(3*A*W1_1);
+
+                   %kiem tra phan 
+                   %y =  roots([A 0 B CT]);
+                   %y(imag(y) ~= 0) = [];
+                   if t ~= 3
+                      W(j,t) = W1 - W2 + BS(1,t) + xi(j);
+                   end
+                   if t == 3
+                      W(j,t) = W1 - W2 + BS(1,t) + xz(j);
+                   end
+
+               end
+            end   
+            zt = '00000000000000000000000000 lan'
+
+            %So sanh W va V        
+            saiso = 0;
             for i = 1:C
-                for j = 1:r
-                    V(i,j)= W(i,j);
+               for j = 1:r              
+                  saiso = saiso + power(W(i,j)-V(i,j),2); 
+               end
+            end
+            saiso = sqrt(saiso);
+
+            %Kiem tra sai so voi Eps
+            if (saiso <= (kU*Eps))
+                break;
+            else          
+                %Lap tiep: Gan V = W
+                for i7 = 1:C
+                    for j = 1:r
+                        V(i,j)= W(i,j);
+                    end
                 end
             end
-        end
-        %Kiem tra voi so lan lap lon nhat
-        if(dem>=maxTest)
-            break;
-        end
-        %Tang so vong lap len
-        dem = dem + 1;
- 
- 
- % saiso
+             %Kiem tra voi so lan lap lon nhat
+             if(dem>=maxTest)
+                break;
+             end
+             %Tang so vong lap len
+               dem = dem + 1;
+
+     % saiso
     end
+    
     MaxU=max(U)
     XTempt = X_next;
     %Dinh vi cum bang MaxU trong moi sensor
+    U
     for k=1:N
         for j=1:C
             if U(j,k)==MaxU(k)
@@ -135,7 +183,7 @@ while (flag~=1)
         end
     end
     cluster = {};
-  XTempt
+  
     for j1 = 1:C
         clusterMembers = [];
         t1 = 1;
@@ -262,7 +310,7 @@ while (flag~=1)
                                 numberDeadnodes = numberDeadnodes + 1
                                 
                                if(clusterTempCH{j2,1}(cl2, 3) == 20)
-                                   numDeadUn = numDeadUn + 1;
+                                   numDeadUn = numDeadUn + 1
                                end
                                matrixEnery(indexX, 3)  = 0
                             end 
@@ -336,7 +384,7 @@ while (flag~=1)
      end 
    end
    
- %   figure, hold on
+ %  figure, hold on
     %for i5=1:C
     %  if(isempty(cluster{i5,1}) == 0)
     %    scatter3(cluster{i5,1}(:,1),cluster{i5,1}(:,2), cluster{i5,1}(:,3),[],colors(i5,:),'filled'); 
@@ -361,8 +409,8 @@ while (flag~=1)
     J_min = round(J_min - totalEnergyConsume,10)
     0.5 *initE * N_init
     EJ (r3) = J_min;
-    lostNode(r3) = N_init - numberDeadnodes;
-    if (J_min < (0.05 *initE *N_init) ||  numberDeadnodes > (0.9* N_init))
+    lostNode(r3) = N_init- numberDeadnodes;
+    if (J_min < (0.03 *initE *N_init) ||  numberDeadnodes > (0.8* N_init))
        flag = 1;
     else
         if totalEnergyConsume == 0
@@ -376,57 +424,74 @@ while (flag~=1)
     end
     
     r3 = r3 + 1;
-    lostUnderNode(r3)= kU- numDeadUn;
+    lostUnderNode(r3)=  kU - numDeadUn
     
-     X_next = [];
-     indexNext = 1;
-     for ik = 1: N_init
-         if  matrixEnery(ik, 2) < 9.99999 &&  matrixEnery(ik, 3) == 1
-             X_next(indexNext, :) = X(ik, :);
-          
-             indexNext = indexNext + 1;
-         end 
-     end
-     X_next
-     [N,r]=size(X_next)
+    X_next = [];
+    indexNext = 1;
+    for ik = 1: N_init
+        if  matrixEnery(ik, 2) < 9.99999 &&  matrixEnery(ik, 3) == 1
+            X_next(indexNext, :) = X(ik, :);
+         
+            indexNext = indexNext + 1;
+        end 
+    end
+   
 end
-EJFCM = EJ;
-lostNumberFCM = lostNode;
-lostNumberUnderGroundFCM = lostUnderNode;
 
-%scatter3(cluster{2,1}(:,1),cluster{2,1}(:,2), cluster{2,1}(:,3),[],colors(1,:),'filled'); 
-%[SN, EJ1] = LEACH_CC();
- 
+  %scatter3(cluster{2,1}(:,1),cluster{2,1}(:,2), cluster{2,1}(:,3),[],colors(1,:),'filled'); 
+  %[SN, EJ1] = LEACH_CC();
+  [EJFCM, lostNumberFCM, lostNumberUnderGroundFCM] = FCMChuanRouting(X,C,m,Eps,maxTest, BS, alpha, kU);
+
 %   figure(1)
-%   plot(EJ)
-%   title({'Tong nang luong tieu hao toan mang fcm-wusn & leach'});
-%   legend({'FCM-WUSN'},'Location','Best')
-%   xlabel('Vòng');
-%   ylabel('Nang luong');
-  
-%  figure(2)
-%   plot(EJ1)
-%   title({'Tong nang luong tieu hao toan mang fcm-wusn & leach'});
-%   legend({'LEACH'},'Location','Best')
-%   xlabel('Vòng');
-%   ylabel('Nang luong');
-  
+%   plot(EJ, 'b')
+%   hold on
+%   plot(EJFCM, 'r') 
+%   title({'Total energy consumption of FCM-WUSN & FCM '});
+%   legend({'FCM-WUSN','FCM' },'Location','Best')
+%   xlabel('Rounds');
+%   ylabel('Energy Consumption');
+%   
+%   hold off;
+%   
 %   figure(3)
 %   yyaxis left
-%   xlabel('Vòng');
-%   ylabel('Nut song')
-%   plot(lostNode)
-%   title({'Tong SL nut con song'});
+%   xlabel('Rounds');
+%   ylabel('Alived Nodes ')
+%   hold on
+%   plot(lostNode, 'b')
+%   hold on
+%   plot(lostNumberFCM, 'g') 
+%   title({'Total alived nodes '});
 %   
 %   yyaxis right
-%   ylabel('Nut song')
-%   plot(lostUnderNode)
-%   legend({'Total sensors dead','SL under sensors dead'},'Location','Best')
-
-%   csvwrite("results-data.txt",EJ);
- 
+%   ylabel('Alived underground nodes')
+%   hold on
+%   plot(lostUnderNode, 'y')
+%   hold on
+%   plot(lostNumberUnderGroundFCM, 'r') 
+%   legend({'Total alived nodes(FCM-WUSN)','Total alived nodes(FCM)', 'Alived un-nodes(FCM-WUSN) ', 'Alived un-nodes(FCM) '},'Location','Best')
+%   %legend({'Total alived nodes(FCM-WUSN)'},'Location','Best')
+%   hold off;
+  
+  output{1,1} = EJ;
+  %csvwrite(fileName_FCMWUSN_EC,EJ);
+  
+  output{2,1} = EJFCM;
+  %csvwrite(fileNameFCM_EC,EJFCM);
+  
+  output{3,1} = lostNode;
+  %csvwrite(fileNameULN,lostNode);
+  
+  output{4,1} = lostNumberFCM;
+  %csvwrite(fileName_FCM_LN,lostNumberFCM);
+  
+  output{5,1} = lostUnderNode;
+  %csvwrite(fileName_FCMWUSN_LUN,lostUnderNode);
+  
+  output{6,1} = lostNumberUnderGroundFCM;
+  %csvwrite(fileName_FCM_LUN,lostNumberUnderGroundFCM);
+  
 end
-
 
 
 function ch = findCHInCluster (cluster, V, j1 )
